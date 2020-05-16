@@ -79,7 +79,7 @@ import xgboost as xgb
 import sys
 # from cStringIO import StringIO
 
-BATCH_SIZE = 512
+BATCH_SIZE = 2048
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -183,6 +183,81 @@ class NLIBiLSTM(nn.Module):
         
         return prediction
 
+import nltk
+from torchtext import data
+
+def tokenizer(text):
+    return [tok for tok in nltk.word_tokenize(text)]
+
+TEXT = data.Field(tokenize = 'spacy', lower = True)
+LABEL = data.LabelField()
+
+from google.colab import drive
+drive.mount('/content/gdrive',force_remount=True)
+train_csv_file = "snli_1.0_train.csv"
+test_csv_file = 'snli_1.0_test.csv' 
+dev_csv_file = 'snli_1.0_dev.csv'
+
+PATH = "/content/gdrive/My Drive/DL assignment 3/"
+train_path = PATH + train_csv_file 
+test_path = PATH + test_csv_file
+dev_path = PATH + dev_csv_file
+
+test_csv = 'snli_1.0_test.csv'
+test_df = pd.read_csv(test_path)
+test_df = test_df[['sentence1','sentence2','gold_label']]
+test_df.to_csv(r'snli_1.0_test.csv',index=False)
+
+train_csv = 'snli_1.0_train.csv'
+train_df = pd.read_csv(train_path)
+train_df = train_df[['sentence1','sentence2','gold_label']]
+train_df.to_csv(r'snli_1.0_train.csv',index=False)
+# test_data = {}
+# test_data['examples'] = []
+# for index,row in test_df.iterrows():
+#   test_data['examples'].append({'premise':row['sentence1'],
+#                     'hypothesis':row['sentence2'],
+#                     'label':row['gold_label']}
+#                    )
+
+# test_data = data.TabularDataset.splits(
+#     path="snli_1.0_test.csv",format="csv", skip_header=True, 
+#     fields=[('sentence1', TEXT),
+#             ('sentence2', TEXT), 
+#             ('gold_label', LABEL)]
+# )
+
+train_data, valid_data, test_data = data.TabularDataset.splits(
+    path="./", train="snli_1.0_train.csv", 
+    validation="snli_1.0_test.csv", test="snli_1.0_test.csv",format="csv", skip_header=True, 
+    fields=[('sentence1', TEXT),
+            ('sentence2', TEXT), 
+            ('gold_label', LABEL)]
+)
+
+print(vars(test_data.examples[0]))
+
+print(f'Number of testing examples: {len(test_data)}')
+
+MIN_FREQ = 2
+
+TEXT.build_vocab(train_data, 
+                 min_freq = MIN_FREQ,
+                 vectors = "glove.6B.300d",
+                 unk_init = torch.Tensor.normal_
+                 )
+
+LABEL.build_vocab(test_data)
+
+print(f"Unique tokens in TEXT vocabulary: {len(TEXT.vocab)}")
+print(f"Unique tokens in LABEL vocabulary: {len(LABEL.vocab)}")
+
+train_iter,valid_iter,test_iter = data.BucketIterator.splits(
+    (train_data, valid_data, test_data), 
+    sort_key=lambda x: len(x.sentence1),
+    batch_size=BATCH_SIZE,
+    device=device)
+
 INPUT_DIM = snli.vocab_size()
 OUTPUT_DIM = snli.out_dim()
 
@@ -192,14 +267,18 @@ snli_rnn = NLIBiLSTM(input_dim = INPUT_DIM,
 
 snli_rnn = torch.load("model/bilstm.pth")
 
+for i in test_iter:
+  continue
+
 #Output labels
-index2label = ['neutral', 'entailment','contradiction','-']
+index2label = ['neutral', 'entailment','contradiction']
 f = open('deep_model.txt','w')
-for batch in snli.test_iter:
-  predicted = snli_rnn(batch['sentence1'],batch['sentence2'])
+for batch in test_iter:
+  # print(batch.gold_label)
+  predicted = snli_rnn(batch.sentence1,batch.sentence2)
 
   for label in predicted:
-    print(label)
+    # print(label)
     _,label = label.max(0)
-    print(label)
+    # print(label)
     f.write(index2label[label]+"\n")
